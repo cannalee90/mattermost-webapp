@@ -1,18 +1,18 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import React from 'react';
-import PropTypes from 'prop-types';
+import React, { Component, ChangeEvent, KeyboardEvent, createRef } from 'react';
 import {Modal} from 'react-bootstrap';
-import {defineMessages, FormattedMessage, injectIntl} from 'react-intl';
+import {defineMessages, FormattedMessage, injectIntl, IntlShape} from 'react-intl';
 
 import Textbox from 'components/textbox';
 import TextboxLinks from 'components/textbox/textbox_links';
 import Constants, {ModalIdentifiers} from 'utils/constants';
-import {intlShape} from 'utils/react_intl';
 import {isMobile} from 'utils/user_agent';
 import {insertLineBreakFromKeyEvent, isKeyPressed, isUnhandledLineBreakKeyCombo, localizeMessage} from 'utils/utils.jsx';
 import {t} from 'utils/i18n';
+import { Channel } from 'mattermost-redux/src/types/channels';
+import {Error} from 'mattermost-redux/types/errors';
 
 const KeyCodes = Constants.KeyCodes;
 
@@ -23,74 +23,49 @@ const holders = defineMessages({
     },
 });
 
-class EditChannelHeaderModal extends React.PureComponent {
-    static propTypes = {
-
-        /*
-         * react-intl helper object
-         */
-        intl: intlShape.isRequired,
-
-        /*
-         * Object with info about current channel ,
-         */
-        channel: PropTypes.object.isRequired,
-
-        /**
-         * Set whether to show the modal or not
-         */
-        show: PropTypes.bool.isRequired,
-
-        /*
-         * boolean should be `ctrl` button pressed to send
-         */
-        ctrlSend: PropTypes.bool.isRequired,
-
-        /*
-         * Should preview be showed
-         */
-        shouldShowPreview: PropTypes.bool.isRequired,
-
-        /*
-         * Collection of redux actions
-         */
-        actions: PropTypes.shape({
-
-            closeModal: PropTypes.func.isRequired,
-
-            /*
-             * patch channel redux-action
-             */
-            patchChannel: PropTypes.func.isRequired,
-
-            /**
-             * Set show preview for textbox
-             */
-            setShowPreview: PropTypes.func.isRequired,
-
-        }).isRequired,
+interface Props {
+    intl: IntlShape;
+    channel: Channel
+    show: boolean;
+    ctrlSend: boolean;
+    shouldShowPreview: boolean;
+    actions: {
+        patchChannel(channelId: string, patch: Channel): Promise<{error: Error}>,        
+        closeModal(modalId: string): void,
+        setShowPreview(newState: boolean): void
     }
+}
 
-    constructor(props) {
+interface State {
+    saving: boolean;
+    header: string;
+    serverError: Error | null,
+}
+
+class EditChannelHeaderModal extends Component<Props, State> {
+    private textBoxRef = createRef<typeof Textbox>();
+
+    constructor(props: Props) {
         super(props);
 
         this.state = {
             header: props.channel.header,
             saving: false,
+            serverError: null,
         };
     }
 
-    handleModalKeyDown = (e) => {
+    handleModalKeyDown = (e: KeyboardEvent<Modal>) => {
         if (isKeyPressed(e, KeyCodes.ESCAPE)) {
             this.hideModal();
         }
     }
 
-    setShowPreview = (newState) => {
+    setShowPreview = (newState: boolean) => {
         this.props.actions.setShowPreview(newState);
     }
 
-    handleChange = (e) => {
+    handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
         this.setState({
             header: e.target.value,
         });
@@ -106,7 +81,10 @@ class EditChannelHeaderModal extends React.PureComponent {
         this.setState({saving: true});
 
         const {channel, actions} = this.props;
-        const {error} = await actions.patchChannel(channel.id, {header});
+        const {error} = await actions.patchChannel(channel.id, {
+            ...channel,
+            header,
+        });
         if (error) {
             this.setState({serverError: error, saving: false});
         } else {
@@ -119,22 +97,24 @@ class EditChannelHeaderModal extends React.PureComponent {
     }
 
     focusTextbox = () => {
-        if (this.refs.editChannelHeaderTextbox) {
-            this.refs.editChannelHeaderTextbox.getWrappedInstance().focus();
+        if (!this.textBoxRef || !this.textBoxRef.current) {
+            return;
         }
+        this.textBoxRef.current!.getWrappedInstance().focus();
     }
 
     blurTextbox = () => {
-        if (this.refs.editChannelHeaderTextbox) {
-            this.refs.editChannelHeaderTextbox.getWrappedInstance().blur();
+        if (!this.textBoxRef || !this.textBoxRef.current) {
+            return;
         }
+        this.textBoxRef.current!.getWrappedInstance().blur();
     }
 
     handleEntering = () => {
         this.focusTextbox();
     }
 
-    handleKeyDown = (e) => {
+    handleKeyDown = (e: KeyboardEvent) => {
         const {ctrlSend} = this.props;
 
         // listen for line break key combo and insert new line character
@@ -145,13 +125,13 @@ class EditChannelHeaderModal extends React.PureComponent {
         }
     }
 
-    handleKeyPress = (e) => {
+    handleKeyPress = (e: KeyboardEvent) => {
         const {ctrlSend} = this.props;
         if (!isMobile() && ((ctrlSend && e.ctrlKey) || !ctrlSend)) {
             if (isKeyPressed(e, KeyCodes.ENTER) && !e.shiftKey && !e.altKey) {
                 e.preventDefault();
                 this.blurTextbox();
-                this.handleSave(e);
+                this.handleSave();
             }
         }
     }
@@ -230,26 +210,25 @@ class EditChannelHeaderModal extends React.PureComponent {
                         </p>
                         <div className='textarea-wrapper'>
                             <Textbox
+                                id='edit_textbox'
                                 value={this.state.header}
                                 onChange={this.handleChange}
                                 onKeyPress={this.handleKeyPress}
-                                onKeyDown={this.handleKeyDown}
                                 supportsCommands={false}
-                                suggestionListStyle='bottom'
+                                useChannelMentions={false}
                                 createMessage={localizeMessage('edit_channel_header.editHeader', 'Edit the Channel Header...')}
-                                previewMessageLink={localizeMessage('edit_channel_header.previewHeader', 'Edit Header')}
-                                handlePostError={this.handlePostError}
-                                id='edit_textbox'
-                                ref='editChannelHeaderTextbox'
+                                onKeyDown={this.handleKeyDown}
+                                suggestionListStyle='bottom'
                                 characterLimit={1024}
                                 preview={this.props.shouldShowPreview}
+                                ref={this.textBoxRef}
                             />
                         </div>
                         <div className='post-create-footer'>
                             <TextboxLinks
+                                previewMessageLink={localizeMessage('edit_channel_header.previewHeader', 'Edit Header')}
                                 characterLimit={1024}
                                 showPreview={this.props.shouldShowPreview}
-                                ref={this.setTextboxLinksRef}
                                 updatePreview={this.setShowPreview}
                                 message={this.state.header}
                             />

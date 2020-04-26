@@ -14,7 +14,7 @@ import {showPreviewOnEditChannelHeaderModal} from 'selectors/views/textbox';
 import {isModalOpen} from '../../selectors/views/modals';
 import {ModalIdentifiers} from '../../utils/constants';
 
-import EditChannelHeaderModal from './edit_channel_header_modal.jsx';
+import EditChannelHeaderModal from './edit_channel_header_modal.tsx';
 
 function mapStateToProps(state) {
     return {
